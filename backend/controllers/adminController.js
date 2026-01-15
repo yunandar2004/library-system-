@@ -32,6 +32,8 @@ const upload = multer({
 
 // ✅ Multer middleware to handle single image upload
 const uploadAdminImage = upload.single("image");
+const uploadUserImage = upload.single("image");
+
 // Excel upload storage
 const excelStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -106,12 +108,43 @@ exports.getUserDetail = async (req, res) => {
 };
 
 // Create user
+// ---------------- Create User ----------------
 exports.createUser = async (req, res) => {
-  const { name, email, password, phone } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = new User({ name, email, password: hashedPassword, phone });
-  await user.save();
-  res.status(201).json(user);
+  try {
+    const { name, email, password, phone } = req.body;
+
+    if (!name || !email || !password || !phone) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: "Email already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const userData = {
+      name,
+      email,
+      password: hashedPassword,
+      phone,
+    };
+
+    // Optional image upload (same as admin)
+    if (req.file) {
+      userData.image = req.file.path;
+    }
+
+    const user = new User(userData);
+    await user.save();
+
+    res.status(201).json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
 // Update user
@@ -155,6 +188,47 @@ exports.restoreUser = async (req, res) => {
   }
 };
 
+// Export all users as Excel
+exports.exportUsers = async (req, res) => {
+  try {
+    const users = await User.find().lean();
+
+    if (!users || users.length === 0) {
+      return res.status(404).json({ error: "No users found" });
+    }
+
+    // Map data for Excel
+    const data = users.map((u) => ({
+      Name: u.name,
+      Email: u.email,
+      Phone: u.phone,
+      Role: u.role,
+      Active: u.isActive ? "Yes" : "No",
+      Banned: u.isBanned ? "Yes" : "No",
+      CreatedAt: u.createdAt.toISOString(),
+    }));
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, "Users");
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // Set headers and send file
+    res.setHeader("Content-Disposition", 'attachment; filename="users.xlsx"');
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to export users" });
+  }
+};
+
 /* ---------------- ADMIN MANAGEMENT ---------------- */
 
 // List admins
@@ -186,21 +260,6 @@ exports.getAdminDetail = async (req, res) => {
   if (!admin) return res.status(404).json({ error: "Admin not found" });
   res.json(admin);
 };
-
-// Create admin
-// exports.createAdmin = async (req, res) => {
-//   const { name, email, password, phone, address } = req.body;
-//   const hashedPassword = await bcrypt.hash(password, 10);
-//   const admin = new Admin({
-//     name,
-//     email,
-//     password: hashedPassword,
-//     phone,
-//     address,
-//   });
-//   await admin.save();
-//   res.status(201).json(admin);
-// };
 
 // ---------------- Create Admin ----------------
 exports.createAdmin = async (req, res) => {
@@ -366,6 +425,7 @@ module.exports = {
   deleteUser: exports.deleteUser,
   banUser: exports.banUser,
   restoreUser: exports.restoreUser,
+  exportUsers: exports.exportUsers,
 
   // Admins
   listAdmins: exports.listAdmins,
@@ -379,4 +439,5 @@ module.exports = {
   importAdmins: exports.importAdmins,
   // Multer middleware
   uploadAdminImage,
+  uploadUserImage
 };

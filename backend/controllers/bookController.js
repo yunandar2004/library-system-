@@ -1,13 +1,112 @@
 const Book = require("../models/Book");
 const BorrowRecord = require("../models/BorrowRecord");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+const XLSX = require("xlsx");
+
+// ---------------- Export Books as Excel ---------------- //
+const exportBooks = async (req, res) => {
+  try {
+    const books = await Book.find().lean();
+
+    if (!books || books.length === 0) {
+      return res.status(404).json({ error: "No books found" });
+    }
+
+    // Map books to a simple object format for Excel
+    const data = books.map((b) => ({
+      Name: b.name,
+      Author: b.author,
+      Category: b.category,
+      "Available Copies": b.availableCopies,
+      "Total Copies": b.totalCopies,
+      "Publisher Year": b.publisherYear,
+      "Borrow Price": b.borrowPrice,
+      Description: b.description,
+      Image: b.image || "",
+      CreatedAt: b.createdAt.toISOString(),
+    }));
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, "Books");
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // Set headers and send file
+    res.setHeader("Content-Disposition", 'attachment; filename="books.xlsx"');
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to export books" });
+  }
+};
 
 /* ---------------- BOOK CRUD ---------------- */
+
+/* ---------------- CREATE BOOK ---------------- */
+
 exports.createBook = async (req, res) => {
   try {
-    const book = new Book(req.body);
+    // 1️⃣ Extract fields from req.body
+    const {
+      name,
+      author,
+      availableCopies,
+      totalCopies,
+      category,
+      publisherYear,
+      borrowPrice,
+      description,
+    } = req.body;
+
+    // 2️⃣ Validate required fields
+    if (
+      !name ||
+      !author ||
+      !availableCopies ||
+      !totalCopies ||
+      !category ||
+      !publisherYear ||
+      !borrowPrice ||
+      !description
+    ) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    // 3️⃣ Build bookData object and convert numeric fields
+    const bookData = {
+      name,
+      author,
+      availableCopies: Number(availableCopies),
+      totalCopies: Number(totalCopies),
+      category,
+      publisherYear: Number(publisherYear),
+      borrowPrice: Number(borrowPrice),
+      description,
+    };
+
+    // 4️⃣ Add image path if file uploaded via multer
+    if (req.file) {
+      bookData.image = req.file.path;
+    }
+
+    // 5️⃣ Save the book to the database
+    const book = new Book(bookData);
     await book.save();
+
+    // 6️⃣ Send success response
     res.status(201).json(book);
   } catch (err) {
+    console.error(err);
     res.status(400).json({ error: err.message });
   }
 };
@@ -133,3 +232,17 @@ exports.orderBook = async (req, res) => {
 
   res.json({ message: "Book ordered successfully", record });
 };
+
+module.exports = {
+  createBook: exports.createBook,
+  updateBook: exports.updateBook,
+  deleteBook: exports.deleteBook,
+  getBookDetail: exports.getBookDetail,
+  listBooks: exports.listBooks,
+  borrowBook: exports.borrowBook,
+  returnBook: exports.returnBook,
+  orderBook: exports.orderBook,
+  exportBooks,
+};
+
+// module.exports = { uploadBookImage };

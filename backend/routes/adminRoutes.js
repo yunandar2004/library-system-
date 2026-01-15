@@ -15,16 +15,22 @@ const {
   banAdmin,
   restoreAdmin,
   uploadAdminImage,
+  uploadUserImage,
   exportAdmins,
+  exportUsers,
 } = require("../controllers/adminController");
 const { protect, adminOnly } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
 /* USER MANAGEMENT */
+// Export users as Excel
+router.get("/users/export", protect, adminOnly, exportUsers);
+
 router.get("/users", protect, adminOnly, listUsers);
+router.post("/users", protect, adminOnly, uploadUserImage, createUser);
 router.get("/users/:id", protect, adminOnly, getUserDetail);
-router.post("/users", protect, adminOnly, createUser);
+// router.post("/users", protect, adminOnly, createUser);
 router.put("/users/:id", protect, adminOnly, updateUser);
 router.delete("/users/:id", protect, adminOnly, deleteUser);
 router.put("/users/:id/ban", protect, adminOnly, banUser);

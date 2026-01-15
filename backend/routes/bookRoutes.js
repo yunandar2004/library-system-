@@ -9,13 +9,17 @@ const {
   borrowBook,
   returnBook,
   orderBook,
+  exportBooks
 } = require("../controllers/bookController");
 const { borrowerReport } = require("../controllers/reportController");
+const { upload } = require("../middleware/uploadMiddlewares"); // ✅ import multer middleware
 
 const router = express.Router();
 
 /* BOOK MANAGEMENT (Admin) */
-router.post("/", protect, adminOnly, createBook);
+// router.post("/", protect, adminOnly, createBook);
+router.post("/", protect, adminOnly, upload.single("image"), createBook);
+router.get("/export", protect, adminOnly, exportBooks); 
 router.put("/:id", protect, adminOnly, updateBook);
 router.delete("/:id", protect, adminOnly, deleteBook);
 router.get("/:id", protect, adminOnly, getBookDetail);
