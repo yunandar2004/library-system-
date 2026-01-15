@@ -6,6 +6,7 @@ const {
   updateUser,
   deleteUser,
   banUser,
+  restoreUser,
   listAdmins,
   getAdminDetail,
   createAdmin,
@@ -13,7 +14,8 @@ const {
   deleteAdmin,
   banAdmin,
   restoreAdmin,
-  restoreUser,
+  uploadAdminImage,
+  exportAdmins,
 } = require("../controllers/adminController");
 const { protect, adminOnly } = require("../middleware/authMiddleware");
 
@@ -26,16 +28,19 @@ router.post("/users", protect, adminOnly, createUser);
 router.put("/users/:id", protect, adminOnly, updateUser);
 router.delete("/users/:id", protect, adminOnly, deleteUser);
 router.put("/users/:id/ban", protect, adminOnly, banUser);
-router.put("/:id/restore",protect, adminOnly, restoreUser);
+router.put("/users/:id/restore", protect, adminOnly, restoreUser);
 
 /* ADMIN MANAGEMENT */
+// Export admins
+router.get("/admins/export", protect, adminOnly, exportAdmins);
+
 router.get("/admins", protect, adminOnly, listAdmins);
 router.get("/admins/:id", protect, adminOnly, getAdminDetail);
-router.post("/admins", protect, adminOnly, createAdmin);
+// Create admin with optional image upload
+router.post("/admins", protect, adminOnly, uploadAdminImage, createAdmin);
 router.put("/admins/:id", protect, adminOnly, updateAdmin);
 router.delete("/admins/:id", protect, adminOnly, deleteAdmin);
 router.put("/admins/:id/ban", protect, adminOnly, banAdmin);
-router.put("/admins/:id/restore", protect, adminOnly, restoreAdmin);
 router.put("/admins/:id/restore", protect, adminOnly, restoreAdmin);
 
 module.exports = router;

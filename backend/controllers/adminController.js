@@ -1,6 +1,60 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const Admin = require("../models/Admin");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const XLSX = require("xlsx");
+
+// / ---------------- Multer Setup ----------------/
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = "uploads/admins";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, `${file.fieldname}-${Date.now()}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+// ✅ Multer middleware to handle single image upload
+const uploadAdminImage = upload.single("image");
+// Excel upload storage
+const excelStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = "uploads/admin-excel";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, `admins-${Date.now()}${ext}`);
+  },
+});
+
+const excelUpload = multer({
+  storage: excelStorage,
+  fileFilter: (req, file, cb) => {
+    const allowed = [".xlsx", ".xls"];
+    const ext = path.extname(file.originalname);
+    if (!allowed.includes(ext))
+      return cb(new Error("Only Excel files allowed"));
+    cb(null, true);
+  },
+});
 
 /* ---------------- USER MANAGEMENT ---------------- */
 
@@ -50,7 +104,6 @@ exports.getUserDetail = async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 };
-
 
 // Create user
 exports.createUser = async (req, res) => {
@@ -102,7 +155,6 @@ exports.restoreUser = async (req, res) => {
   }
 };
 
-
 /* ---------------- ADMIN MANAGEMENT ---------------- */
 
 // List admins
@@ -136,18 +188,51 @@ exports.getAdminDetail = async (req, res) => {
 };
 
 // Create admin
+// exports.createAdmin = async (req, res) => {
+//   const { name, email, password, phone, address } = req.body;
+//   const hashedPassword = await bcrypt.hash(password, 10);
+//   const admin = new Admin({
+//     name,
+//     email,
+//     password: hashedPassword,
+//     phone,
+//     address,
+//   });
+//   await admin.save();
+//   res.status(201).json(admin);
+// };
+
+// ---------------- Create Admin ----------------
 exports.createAdmin = async (req, res) => {
-  const { name, email, password, phone, address } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const admin = new Admin({
-    name,
-    email,
-    password: hashedPassword,
-    phone,
-    address,
-  });
-  await admin.save();
-  res.status(201).json(admin);
+  try {
+    const { name, email, password, phone, address } = req.body;
+
+    if (!name || !email || !password || !phone || !address) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const adminData = {
+      name,
+      email,
+      password: hashedPassword,
+      phone,
+      address,
+    };
+
+    if (req.file) {
+      adminData.image = req.file.path; // store uploaded image path
+    }
+
+    const admin = new Admin(adminData);
+    await admin.save();
+
+    res.status(201).json(admin);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
 // Update admin
@@ -206,3 +291,92 @@ exports.updateAdminImage = async (req, res) => {
   res.json(admin);
 };
 
+// Export all admins as Excel
+exports.exportAdmins = async (req, res) => {
+  try {
+    const admins = await Admin.find().lean();
+
+    if (!admins || admins.length === 0) {
+      return res.status(404).json({ error: "No admins found" });
+    }
+
+    // Map data to simple objects for Excel
+    const data = admins.map((a) => ({
+      Name: a.name,
+      Email: a.email,
+      Phone: a.phone,
+      Address: a.address,
+      Role: a.role,
+      Active: a.isActive ? "Yes" : "No",
+      Banned: a.isBanned ? "Yes" : "No",
+      CreatedAt: a.createdAt.toISOString(),
+    }));
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, "Admins");
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // Set headers and send
+    res.setHeader("Content-Disposition", 'attachment; filename="admins.xlsx"');
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to export admins" });
+  }
+};
+// Example: import admins from an Excel file
+exports.importAdmins = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    const admins = data.map((row) => ({
+      name: row.Name,
+      email: row.Email,
+      phone: row.Phone,
+      address: row.Address,
+      password: bcrypt.hashSync(row.Password || "default123", 10),
+    }));
+
+    await Admin.insertMany(admins);
+    res.json({ message: `${admins.length} admins imported successfully` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to import admins" });
+  }
+};
+
+module.exports = {
+  // Users
+  listUsers: exports.listUsers,
+  getUserDetail: exports.getUserDetail,
+  createUser: exports.createUser,
+  updateUser: exports.updateUser,
+  deleteUser: exports.deleteUser,
+  banUser: exports.banUser,
+  restoreUser: exports.restoreUser,
+
+  // Admins
+  listAdmins: exports.listAdmins,
+  getAdminDetail: exports.getAdminDetail,
+  createAdmin: exports.createAdmin,
+  updateAdmin: exports.updateAdmin,
+  deleteAdmin: exports.deleteAdmin,
+  banAdmin: exports.banAdmin,
+  restoreAdmin: exports.restoreAdmin,
+  exportAdmins: exports.exportAdmins,
+  importAdmins: exports.importAdmins,
+  // Multer middleware
+  uploadAdminImage,
+};
